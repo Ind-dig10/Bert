@@ -1,4 +1,3 @@
-
 import os
 import sys
 from collections import Counter
@@ -6,15 +5,16 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from transformers import BertTokenizer, BertForSequenceClassification, get_cosine_schedule_with_warmup, AdamW
 
+# Чтение тренировочной и тестовой выборки
 train = pd.read_csv('train.csv')
 test = pd.read_csv('test.csv')
-#sample_submission = pd.read_csv('sample_submission.csv')
+
+# Берем уникальные классы
 CLASSES = list(train['category'].unique())
 print(CLASSES)
 
@@ -24,15 +24,7 @@ test['text_length'] = test['text'].apply(len)
 train['occurrence'] = train['text'].map(dict(Counter(train['text'].to_list())))
 test['occurrence'] = test['text'].map(dict(Counter(test['text'].to_list())))
 
-
-# -*- coding: utf-8 -*-
-#train = train.drop(train[train['text'] == 'Топовые кроссовки для баскетбола tokenoidtokenoid любимых игроков NBA tokenoidtokenoid 6 лет выполнили 100. 000 заказов'].index)
-#train = train.drop(train[train['text'] == 'Премиальный подарок мужчине 33 Шахматы и нарды с именной гравировкой из массива дуба латуни и натуральной кожи. Посмотреть цены'].index)
-
-
-#test = test.drop(test[test['occurrence'] > 3].index)
-#test = test.drop(test[test['text'] == 'СПОЧНО СООБЩЕСТВО ПРОДАЕТСЯ ЗА 1300Р ЗА ПОКУПКОЙ ПИШИТЕ В ЛС 33 ВСЕ ГАРАНТИИ С МЕНЯ 33'].index)
-
+# Обучающая (85%), валидационная (10%), и тестовая (5%)
 df_train, df_val, df_test = np.split(train.sample(frac=1, random_state=42),
                                      [int(.85*len(train)), int(.95*len(train))])
 print(df_train.shape)
@@ -42,7 +34,7 @@ print(len(df_train) + len(df_val) + len(df_test) == len(train))
 
 labels = dict(zip(CLASSES, range(len(CLASSES))))
 
-
+"""Класс для создания пользовательского датасета"""
 class CustomDataset(torch.utils.data.Dataset):
     def __init__(self, df, tokenizer, phase='test'):
         self.phase = phase
@@ -84,7 +76,7 @@ class CustomDataset(torch.utils.data.Dataset):
             batch_oid = self.get_batch_oid(idx)
             return batch_texts, batch_oid
 
-
+"""Классификатор BERT"""
 class BertClassifier:
     def __init__(self, model_path, tokenizer_path, data, n_classes=13, epochs=5):
         self.model = BertForSequenceClassification.from_pretrained(model_path)
@@ -97,6 +89,9 @@ class BertClassifier:
         self.model.classifier = torch.nn.Linear(self.out_features, n_classes).cuda()
         self.model = self.model.cuda()
 
+    """
+    Подготовка данных для обучения
+    """
     def preparation(self):
         self.df_train, self.df_val, self.df_test = np.split(self.data.sample(frac=1, random_state=42),
                                                             [int(.85 * len(self.data)), int(.95 * len(self.data))])
@@ -107,12 +102,14 @@ class BertClassifier:
         self.train_dataloader = torch.utils.data.DataLoader(self.train, batch_size=4, shuffle=True)
         self.val_dataloader = torch.utils.data.DataLoader(self.val, batch_size=4)
 
+        # Оптимизатор, для обновления параметров во время обучения
         self.optimizer = AdamW(self.model.parameters(), lr=2e-5, correct_bias=False)
         self.scheduler = get_cosine_schedule_with_warmup(
             self.optimizer,
             num_warmup_steps=0,
             num_training_steps=len(self.train_dataloader) * self.epochs
         )
+        # Функция потерь
         self.loss_fn = torch.nn.CrossEntropyLoss().cuda()
 
     def fit(self):
